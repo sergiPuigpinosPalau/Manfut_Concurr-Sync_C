@@ -45,4 +45,22 @@ struct TBestEquip
 };
 typedef struct TBestEquip *PtrBestEquip, TBestEquip;
 
+struct threadsArg{
+	TEquip first;
+	TEquip end;
+	long int PresupostFitxatges;
+};
+
+struct Tstatistics{
+    int numComb;
+    int numInvComb;
+    int numValidComb;
+    int avgCostValidComb;
+    int avgScoreValidComb;
+    TJugadorsEquip bestCombination;
+    int bestScore;
+    TJugadorsEquip worseCombination;
+    int worseScore;
+};
+
 #define DMaxJugadors 1000

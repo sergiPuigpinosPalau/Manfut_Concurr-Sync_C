@@ -19,10 +19,14 @@ Grau Informàtica
 #include <semaphore.h>
 #include "manfut.h"
 
+#include <stdbool.h>//TODO ask
+
 #define GetPorter(j) (Jugadors[j])
 #define GetDefensor(j) (Jugadors[NPorters+j])
 #define GetMitg(j) (Jugadors[NPorters+NDefensors+j])
 #define GetDelanter(j) (Jugadors[NPorters+NDefensors+NMitjos+j])
+#define MAX_BUFFER_LENGTH 430
+#define ARRAY_SIZE 100
 
 char *color_red = "\033[01;31m";
 char *color_green = "\033[01;32m";
@@ -31,7 +35,7 @@ char *end_color = "\033[00m";
 
 // Definition functions prototype
 void LlegirFitxerJugadors(char *pathJugadors);
-void CalcularEquipOptim(long int PresupostFitxatges, PtrJugadorsEquip MillorEquip, int numOfThreads);
+void CalcularEquipOptim(long int PresupostFitxatges, PtrJugadorsEquip MillorEquipPtr);
 TJugadorsEquip* evaluateThreadFunc(void* arguments);
 TBoolean ObtenirJugadorsEquip (TEquip equip, PtrJugadorsEquip jugadors);
 TEquip GetEquipInicial();
@@ -42,37 +46,61 @@ void error(char *str);
 unsigned int Log2(unsigned long long int n);
 void PrintJugadors();
 void PrintEquipJugadors(TJugadorsEquip equip);
+//TODO fill all
+void checkTeam(TEquip equip, TJugadorsEquip jugadors, int PresupostFitxatges, int costEquip, int puntuacioEquip);
+void calculateStatistics(TJugadorsEquip jugadors, int costEquip, int puntuacioEquip, struct Tstatistics statistics);
+void calculateGlobalStatistics(struct Tstatistics statistics);
+void printStatistics(struct Tstatistics statistics);
+void printGlobalStatistics();
+void printMessages();
+void addMessageToQueue(char* message);
+void forcePrint();
+void messengerThreadFunc();
+const char* toStringEquipJugadors(TJugadorsEquip equip);
 
 // Global variables definition
 TJugador Jugadors[DMaxJugadors];
 int NJugadors, NPorters, NDefensors, NMitjos, NDelanters;
-char cad[256];
+char cad[MAX_BUFFER_LENGTH];
+
+int M = 2500;
+int numOfThreads;
+
+//TODO clean
+//Shared variables
+PtrJugadorsEquip MillorEquip; 
+int MaxPuntuacio=-1;
+
+//Messenger shared variables
+
+char messageArray[ARRAY_SIZE][MAX_BUFFER_LENGTH];
+bool bForcePrint = false;
+int messageArrayIndx = 0;
+
+//Mutex & locks
+pthread_mutex_t checkTeamLock = PTHREAD_MUTEX_INITIALIZER; 
+pthread_mutex_t evaluatorLock = PTHREAD_MUTEX_INITIALIZER; 
+pthread_mutex_t messengerArrayLock = PTHREAD_MUTEX_INITIALIZER;
+//Conditions
+pthread_cond_t itemAdded = PTHREAD_COND_INITIALIZER;
+pthread_cond_t evaluatorsEnded = PTHREAD_COND_INITIALIZER;
+//Semaphore
+sem_t messengerSemaphore;
+//Barrier
+pthread_barrier_t evaluatorBarrier; 
+
+//Shared variables
+int threadsFinished = 0;
+struct Tstatistics globalStatistics;
 
 
-
-struct threadsArg{
-	TEquip first;
-	TEquip end;
-	long int PresupostFitxatges;
-};
-
-struct Tstatistics{
-    int numComb = 0;
-    int numInvComb = 0;
-    int numValidComb = 0;
-    int avgCostValidComb = 0;
-    int avgScoreValidComb = 0;
-    TJugadorsEquip bestCombination;
-    int bestScore = 0;
-    TJugadorsEquip worseCombination;
-    int worseScore = 0;
-};
 
 int main(int argc, char *argv[])
 {
-	TJugadorsEquip MillorEquip, AuxEquip;
+	TJugadorsEquip AuxEquip, MillorEquipRtn;
 	long int PresupostFitxatges;
-	int numOfThreads;
+	
+	
 	float IntervalBegin=-1, IntervalEnd=-1;
 	
 	if (argc<3) 
@@ -88,14 +116,18 @@ int main(int argc, char *argv[])
 	if (numOfThreads <= 0)
 		error("Invalid number of Threads");
 
-	//TODO define M
+	if (argc > 3){
+        M = atoi(argv[4]);
+        if (M <= 0)
+            error("Error in arguments: Invalid M");
+    }
 
 	// Calculate the best team.
-	CalcularEquipOptim(PresupostFitxatges, &MillorEquip, numOfThreads);
+	CalcularEquipOptim(PresupostFitxatges, &MillorEquipRtn);
 	write(1,color_blue,strlen(color_blue));
 	write(1,"-- Best Team -------------------------------------------------------------------------------------\n",strlen("-- Best Team -------------------------------------------------------------------------------------\n"));
-	PrintEquipJugadors(MillorEquip);
-	sprintf(cad,"   Cost %d, Points: %d.\n", CostEquip(MillorEquip), PuntuacioEquip(MillorEquip));
+	PrintEquipJugadors(MillorEquipRtn);
+	sprintf(cad,"   Cost %d, Points: %d.\n", CostEquip(MillorEquipRtn), PuntuacioEquip(MillorEquipRtn));
 	write(1,cad,strlen(cad));
 	write(1,"-----------------------------------------------------------------------------------------------------\n",strlen("-----------------------------------------------------------------------------------------------------\n"));
 	write(1,end_color,strlen(end_color));
@@ -199,40 +231,17 @@ void LlegirFitxerJugadors(char *pathJugadors)
 
 //TODO includes
 
-//Shared variables
-TJugadorsEquip MillorEquip; //TODO change name
-int MaxPuntuacio=-1;
-
-//Messenger shared variables
-int LIST_SIZE = 100;
-char *messageArray[LIST_SIZE];
-bool bForcePrint = false;
-int messageArrayIndx = 0;
-
-//Mutex & locks
-pthread_mutex_t checkTeamLock = PTHREAD_MUTEX_INITIALIZER; 
-pthread_mutex_t evaluatorLock = PTHREAD_MUTEX_INITIALIZER; 
-pthread_mutex_t messengerArrayLock = PTHREAD_MUTEX_INITIALIZER;
-//Conditions
-pthread_cond_t itemAdded = PTHREAD_COND_INITIALIZER;
-pthread_cond_t evaluatorsEnded = PTHREAD_COND_INITIALIZER;
-//Semaphore
-pthread_mutex_t messengerSemMutex = PTHREAD_MUTEX_INITIALIZER;
-//Barrier
-pthread_barrier_t evaluatorBarrier; 
-
-//Shared variables
-int threadsFinished = 0;
-struct Tstatistics globalStatistics;
 
 
 
-void CalcularEquipOptim(long int PresupostFitxatges, PtrJugadorsEquip MillorEquip, int numOfThreads)
+
+void CalcularEquipOptim(long int PresupostFitxatges, PtrJugadorsEquip MillorEquipRtn)
 {
 	unsigned int maxbits;
 	TEquip equip, primerEquip, ultimEquip, first, end;
 	struct threadsArg *args[numOfThreads];	
 	pthread_t TArray[numOfThreads];
+	pthread_t messengerThread;
 	
 	// Calculated number of bits required for all teams codification.
 	maxbits=Log2(NPorters)*DPosPorters+Log2(NDefensors)*DPosDefensors+Log2(NMitjos)*DPosMitjos+Log2(NDelanters)*DPosDelanters;
@@ -252,13 +261,16 @@ void CalcularEquipOptim(long int PresupostFitxatges, PtrJugadorsEquip MillorEqui
 
 	int remaining = ultimEquip-primerEquip;
 
-	//Initialize mutex
-	//TODO if returns -1
-	//TODO choose initialize static or dynamic
-	pthread_mutex_init(&checkTeamLock, NULL); 
-	pthread_mutex_init(&messengerArrayLock, NULL); 
-	pthread_barrier_init(&evaluatorBarrier, NULL, numOfThreads);
-	sem_init(&messengerSemMutex, 0, LIST_SIZE); 
+	//Initialize barrier and semaphore
+	if (pthread_barrier_init(&evaluatorBarrier, NULL, numOfThreads))
+		error("Error while trying to create the barrier"); 
+	
+	if (sem_init(&messengerSemaphore, 0, ARRAY_SIZE) != 0)
+		error("Error while trying to create the semaphore"); 
+
+	//Start messenger thread
+	if (pthread_create(&messengerThread, NULL, (void *)messengerThreadFunc, NULL) != 0)
+		error("Error while trying to create the messenger thread");	
 
 	//Start threads
 	for (int i=0; i<numOfThreads; ++i){	
@@ -270,16 +282,28 @@ void CalcularEquipOptim(long int PresupostFitxatges, PtrJugadorsEquip MillorEqui
 		args[i]->end = threadEnd;		
 		args[i]->PresupostFitxatges = PresupostFitxatges;		
 		if (pthread_create(&TArray[i], NULL, (void *)evaluateThreadFunc, (void *)args[i]) != 0)
-			error("Error on creating pthread");
+			error("Error while trying to create the evaluator's threads");
 		remaining -= pivot;		
 	}
 
-	//Join threads and get the data from each one
+	//Wait for the ending signal
 	pthread_mutex_lock(&evaluatorLock);
 	pthread_cond_wait(&evaluatorsEnded, &evaluatorLock);
 	pthread_mutex_unlock(&evaluatorLock);
 
-	//TODO return
+	memcpy(MillorEquipRtn,MillorEquip,sizeof(TJugadorsEquip));
+
+	//Destroy semaphore
+	sem_destroy(&messengerSemaphore);
+	//Destroy barrier
+	pthread_barrier_destroy(&evaluatorBarrier);
+	//Destroy conditions
+	pthread_cond_destroy(&itemAdded);
+	pthread_cond_destroy(&evaluatorsEnded);
+	//Destroy mutex
+	pthread_mutex_destroy(&checkTeamLock);
+	pthread_mutex_destroy(&evaluatorLock);
+	pthread_mutex_destroy(&messengerArrayLock);
 }
 
 
@@ -311,30 +335,28 @@ TJugadorsEquip* evaluateThreadFunc(void* arguments)
 			//addMessageToQueue(cad);
 			continue;	// Equip no valid.
 		}
-		
+
+		//Store repeated operations into variables
 		int costEquip = CostEquip(jugadors);
 		int puntuacioEquip = PuntuacioEquip(jugadors);
-
-		
+	
+		//Check Team
 		pthread_mutex_lock(&checkTeamLock);
 		checkTeam(equip, jugadors, args->PresupostFitxatges, costEquip, puntuacioEquip);
 		pthread_mutex_unlock(&checkTeamLock);
 
-
 		calculateStatistics(jugadors, costEquip, puntuacioEquip, statistics);
 
 		if (statistics.numComb%M == 0)
-            printStatistics();
-
+            printStatistics(statistics);
 	}
 
-	//TODO implement end / use barrier? 
+	//Wait for threads using a barrier
 	int rc = pthread_barrier_wait(&evaluatorBarrier); 
 	if(rc != 0 && rc != PTHREAD_BARRIER_SERIAL_THREAD)
-	{
-		printf("No puedo esperar en la barrera.\n");
-		exit(-1);
-	} 
+		error("Can't wait for barrier");
+
+	//Print global statistics; send signal to parent
 	pthread_mutex_lock(&evaluatorLock);
 	printStatistics(statistics);
 	calculateGlobalStatistics(statistics);
@@ -342,17 +364,14 @@ TJugadorsEquip* evaluateThreadFunc(void* arguments)
 	if (threadsFinished == numOfThreads - 1){
 		printGlobalStatistics();
 		forcePrint();
-		evaluatorsEnded.signalAll();
+		pthread_cond_signal(&evaluatorsEnded);
 	} else {
 		threadsFinished++;
 	}	
 	pthread_mutex_unlock(&evaluatorLock);
-	
-
 
 	free(arguments);
 }
-
 
 void checkTeam(TEquip equip, TJugadorsEquip jugadors, int PresupostFitxatges, int costEquip, int puntuacioEquip){
 	// Chech if the team points is bigger than current optimal team, then evaluate if the cost is lower than the available budget
@@ -360,16 +379,18 @@ void checkTeam(TEquip equip, TJugadorsEquip jugadors, int PresupostFitxatges, in
 	{
 		// We have a new partial optimal team.
 		MaxPuntuacio=puntuacioEquip;
-		MillorEquip=jugadors;
+		//MillorEquip=jugadors;
+		memcpy(MillorEquip,&jugadors,sizeof(TJugadorsEquip));
 		sprintf(cad,"%s Team %lld -> Cost: %d  Points: %d. %s\n", color_green, equip, costEquip, puntuacioEquip, end_color);
 		//write(1,cad,strlen(cad));
-		addMessageToQueue(cad);
+		//addMessageToQueue(cad);
 	}
 	else
 	{
 		sprintf(cad,"Team %lld -> Cost: %d  Points: %d. \r", equip, costEquip, puntuacioEquip);
-		addMessageToQueue(cad);
+		//addMessageToQueue(cad);
 	}
+	addMessageToQueue(cad);
 }
 
 void calculateStatistics(TJugadorsEquip jugadors, int costEquip, int puntuacioEquip, struct Tstatistics statistics) {
@@ -405,10 +426,10 @@ void printStatistics(struct Tstatistics statistics){
 	 	\nNúmero de Combinaciones evaluadas: %d \
 		\nNúmero de combinaciones no válidas: %d \
 		\nCoste promedio de las combinaciones válidas: %d \
-		\nPuntuación promedio de las combinaciones válidas: %d \
-		\nMejor combinación (desde el punto de vista de la puntuación): %d \
-		\nPeor combinación (desde el punto de vista de la puntuación): %d\
-		\n********************************************************", getpid(), statistics.numComb, statistics.numInvComb, statistics.avgCostValidComb), statistics.avgScoreValidComb, toStringEquipJugadors(statistics.bestCombination), toStringEquipJugadors(statistics.worseCombination);
+		\nPuntuación promedio de las combinaciones válidas: %i \
+		\nMejor combinación (desde el punto de vista de la puntuación): %s \
+		\nPeor combinación (desde el punto de vista de la puntuación): %s\
+		\n********************************************************", getpid(), statistics.numComb, statistics.numInvComb, statistics.avgCostValidComb, statistics.avgScoreValidComb, toStringEquipJugadors(statistics.bestCombination), toStringEquipJugadors(statistics.worseCombination));
 	addMessageToQueue(cad);
 }
 
@@ -419,17 +440,16 @@ void printGlobalStatistics(){
 		\nNúmero de combinaciones no válidas: %d \
 		\nCoste promedio de las combinaciones válidas: %d \
 		\nPuntuación promedio de las combinaciones válidas: %d \
-		\nMejor combinación (desde el punto de vista de la puntuación): %d \
-		\nPeor combinación (desde el punto de vista de la puntuación): %d\
-		\n********************************************************", globalStatistics.numComb, globalStatistics.numInvComb, globalStatistics.avgCostValidComb), globalStatistics.avgScoreValidComb, toStringEquipJugadors(globalStatistics.bestCombination), toStringEquipJugadors(globalStatistics.worseCombination);
+		\nMejor combinación (desde el punto de vista de la puntuación): %s \
+		\nPeor combinación (desde el punto de vista de la puntuación): %s\
+		\n********************************************************", globalStatistics.numComb, globalStatistics.numInvComb, globalStatistics.avgCostValidComb, globalStatistics.avgScoreValidComb, toStringEquipJugadors(globalStatistics.bestCombination), toStringEquipJugadors(globalStatistics.worseCombination));
 	addMessageToQueue(cad);
 }
 
 
-
 //Messenger thread
 void printMessages(){
-	for (int i = 0; i < LIST_SIZE; i++)
+	for (int i = 0; i < ARRAY_SIZE; i++)
 	{
 		printf("%s",messageArray[i]);
 	}
@@ -437,11 +457,11 @@ void printMessages(){
 	messageArrayIndx = 0;
 }
 
-void addMessageToQueue(char* message) {
-	sem_wait(&messengerSemMutex)
+void addMessageToQueue(char* message){
+	sem_wait(&messengerSemaphore);
 	pthread_mutex_lock(&messengerArrayLock); 
 	//TODO possible crash
-	messageArray[messageArrayIndx] = message;
+	strcpy(messageArray[messageArrayIndx], message);
 	messageArrayIndx++;
 	pthread_cond_signal(&itemAdded);
 	pthread_mutex_unlock(&messengerArrayLock);
@@ -456,19 +476,20 @@ void forcePrint(){
 }
 
 
-void messengerThread(){
+void messengerThreadFunc(){
 	while (true){
 		pthread_mutex_lock(&messengerArrayLock); 
 		//Wait until list is full
-		while (messageArrayIndx != LIST_SIZE && !bForcePrint)
+		while (messageArrayIndx != ARRAY_SIZE && !bForcePrint)
 			pthread_cond_wait(&itemAdded, &messengerArrayLock);
 		//TODO check it returns the desired value
-		int remaining = sem_getvalue(&messengerSemMutex);   //In case of a forcePrint
+		int remaining;
+		sem_getvalue(&messengerSemaphore, &remaining);   //In case of a forcePrint
 		printMessages();
 		//Release
-		for (int i = 0; i < LIST_SIZE-remaining; i++)
+		for (int i = 0; i < ARRAY_SIZE-remaining; i++)
 		{
-			sem_post(&messengerSemMutex);
+			sem_post(&messengerSemaphore);
 		}		
 		bForcePrint=false;
 		pthread_mutex_unlock(&messengerArrayLock);
@@ -736,43 +757,44 @@ void PrintEquipJugadors(TJugadorsEquip equip)
 const char* toStringEquipJugadors(TJugadorsEquip equip)
 {
 	int x;
+	//char rtnString[MAX_BUFFER_LENGTH];
 	char* rtnString;
 
-	strncpy(rtnString, "   Porters: ");
+	strcpy(rtnString, "   Porters: ");
 	//write(1,"   Porters: ",strlen("   Porters: "));
 	for(x=0;x<DPosPorters;x++)
 	{
 		sprintf(cad,"%s (%d/%d), ",GetPorter(equip.Porter[x]).nom, GetPorter(equip.Porter[x]).cost, GetPorter(equip.Porter[x]).punts);
-		strncpy(rtnString, cad);
+		strcpy(rtnString, cad);
 	}
-	strncpy(rtnString, "\n");
+	strcpy(rtnString, "\n");
 	
 	//write(1,"   Defenses: ",strlen("   Defenses: "));
-	strncpy(rtnString, "   Defenses: ");
+	strcpy(rtnString, "   Defenses: ");
 	for(x=0;x<DPosDefensors;x++)
 	{
 		sprintf(cad,"%s (%d/%d), ",GetDefensor(equip.Defensors[x]).nom, GetDefensor(equip.Defensors[x]).cost, GetDefensor(equip.Defensors[x]).punts);
-		strncpy(rtnString, cad);
+		strcpy(rtnString, cad);
 	}
-	strncpy(rtnString, "\n");
+	strcpy(rtnString, "\n");
 	
 	//write(1,"   Mitjos: ",strlen("   Mitjos: "));
-	strncpy(rtnString, "   Mitjos: ");
+	strcpy(rtnString, "   Mitjos: ");
 	for(x=0;x<DPosMitjos;x++)
 	{
 		sprintf(cad,"%s (%d/%d), ",GetMitg(equip.Mitjos[x]).nom, GetMitg(equip.Mitjos[x]).cost, GetMitg(equip.Mitjos[x]).punts);
-		strncpy(rtnString, cad);
+		strcpy(rtnString, cad);
 	}
-	strncpy(rtnString, "\n");
+	strcpy(rtnString, "\n");
 	
 	//write(1,"   Delanters: ",strlen("   Delanters: "));
-	strncpy(rtnString, "   Delanters: ");
+	strcpy(rtnString, "   Delanters: ");
 	for(x=0;x<DPosDelanters;x++)
 	{
 		sprintf(cad,"%s (%d/%d), ",GetDelanter(equip.Delanters[x]).nom, GetDelanter(equip.Delanters[x]).cost, GetDelanter(equip.Delanters[x]).punts);
-		strncpy(rtnString, cad);
+		strcpy(rtnString, cad);
 	}
-	strncpy(rtnString, "\n");
+	strcpy(rtnString, "\n");
 
 	return rtnString;
 }
