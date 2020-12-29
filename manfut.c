@@ -445,19 +445,43 @@ void calculateGlobalStatistics(struct Tstatistics statistics){
 	}
 }
 
-
-
+void printStatistics(struct Tstatistics statistics){
+	char bestComb[200];
+	char worseComb[200];
+	toStringEquipJugadors(statistics.bestCombination, bestComb);
+	toStringEquipJugadors(statistics.worseCombination, worseComb);//TODO getpid
+	sprintf(cad, "*******THREAD %d STATISTICS******\
+	 	\nNúmero de Combinaciones evaluadas: %d \
+		\nNúmero de combinaciones no válidas: %d \
+		\nCoste promedio de las combinaciones válidas: %d \
+		\nPuntuación promedio de las combinaciones válidas: %i \
+		\nMejor combinación (desde el punto de vista de la puntuación):\n%s \
+		\nPeor combinación (desde el punto de vista de la puntuación):\n%s\
+		\n********************************************************\n", getpid(), statistics.numComb, statistics.numInvComb, statistics.avgCostValidComb, statistics.avgScoreValidComb, bestComb, worseComb);
+	//sprintf(cad,"statistic");
+	//sprintf(cad,"BRUH %s", bestComb);
+	//write(1,cad,strlen(cad));
+	//sleep(5);
+	addMessageToQueue(cad);
+	//free(bestComb);
+	//free(worseComb);
+	//TODO free
+}
 
 void printGlobalStatistics(){
-	//sprintf(cad, "*******GLOBAL  STATISTICS******\
+	char bestComb[200];
+	char worseComb[200];
+	toStringEquipJugadors(globalStatistics.bestCombination, bestComb);
+	toStringEquipJugadors(globalStatistics.worseCombination, worseComb);
+	sprintf(cad, "*******GLOBAL  STATISTICS******\
 	 	\nNúmero de Combinaciones evaluadas: %d \
 		\nNúmero de combinaciones no válidas: %d \
 		\nCoste promedio de las combinaciones válidas: %d \
 		\nPuntuación promedio de las combinaciones válidas: %d \
-		\nMejor combinación (desde el punto de vista de la puntuación): %s \
-		\nPeor combinación (desde el punto de vista de la puntuación): %s\
-		\n********************************************************", globalStatistics.numComb, globalStatistics.numInvComb, globalStatistics.avgCostValidComb, globalStatistics.avgScoreValidComb, toStringEquipJugadors(globalStatistics.bestCombination), toStringEquipJugadors(globalStatistics.worseCombination));
-	//addMessageToQueue(cad);
+		\nMejor combinación (desde el punto de vista de la puntuación):\n%s \
+		\nPeor combinación (desde el punto de vista de la puntuación):\n%s\
+		\n********************************************************\n", globalStatistics.numComb, globalStatistics.numInvComb, globalStatistics.avgCostValidComb, globalStatistics.avgScoreValidComb, bestComb, worseComb);
+	addMessageToQueue(cad);
 }
 
 
@@ -505,22 +529,22 @@ void messengerThreadFunc(){
 		//Wait until list is full
 		while (messageArrayIndx != ARRAY_SIZE && !bForcePrint && !exitMess)
 			pthread_cond_wait(&itemAdded, &messengerArrayLock);
-		if (exitMess)
-			continue;
 		//TODO check it returns the desired value
-		int remaining;
-		sem_getvalue(&messengerSemaphore, &remaining);   //In case of a forcePrint
-		//sprintf(cad,"BRUH %s \n", messageArray[25]);
-		//write(1,cad,strlen(cad));
-		printMessages();
-		//Release
-		for (int i = 0; i < ARRAY_SIZE-remaining; i++)
-		{
-			sem_post(&messengerSemaphore);
+		if (messageArrayIndx > 0){
+			int remaining;
+			sem_getvalue(&messengerSemaphore, &remaining);   //In case of a forcePrint
+			//sprintf(cad,"BRUH %s \n", messageArray[25]);
+			//write(1,cad,strlen(cad));
+			printMessages();
+			//Release
+			for (int i = 0; i < ARRAY_SIZE-remaining; i++)
+			{
+				sem_post(&messengerSemaphore);
+			}
 		}		
 		bForcePrint=false;
 		pthread_mutex_unlock(&messengerArrayLock);
-	}
+	}//TODO delete forceprint?
 	pthread_mutex_unlock(&messengerArrayLock);
 	pthread_cond_signal(&messengerEnded);
 }
@@ -781,28 +805,7 @@ void PrintEquipJugadors(TJugadorsEquip equip)
 	write(1,"\n",strlen("\n"));
 }
 
-void printStatistics(struct Tstatistics statistics){
-	char bestComb[200];
-	char worseComb[200];
-	toStringEquipJugadors(statistics.bestCombination, bestComb);
-	toStringEquipJugadors(statistics.worseCombination, worseComb);
-	sprintf(cad, "*******THREAD %d STATISTICS******\
-	 	\nNúmero de Combinaciones evaluadas: %d \
-		\nNúmero de combinaciones no válidas: %d \
-		\nCoste promedio de las combinaciones válidas: %d \
-		\nPuntuación promedio de las combinaciones válidas: %i \
-		\nMejor combinación (desde el punto de vista de la puntuación):\n %s \
-		\nPeor combinación (desde el punto de vista de la puntuación):\n %s\
-		\n********************************************************\n", getpid(), statistics.numComb, statistics.numInvComb, statistics.avgCostValidComb, statistics.avgScoreValidComb, bestComb, worseComb);
-	//sprintf(cad,"statistic");
-	//sprintf(cad,"BRUH %s", bestComb);
-	//write(1,cad,strlen(cad));
-	//sleep(5);
-	addMessageToQueue(cad);
-	//free(bestComb);
-	//free(worseComb);
-	//TODO free
-}
+
 
 void toStringEquipJugadors(TJugadorsEquip equip, char* outpString)
 {
@@ -851,8 +854,7 @@ void toStringEquipJugadors(TJugadorsEquip equip, char* outpString)
 	{
 		outpString[i] = rtnString[i];
 	}
-	
-
+	//strncpy(outpString,rtnString,200);
 	//char* rtnString2 = malloc(strlen(rtnString)*sizeof(char));
 	//strcpy(outpString, rtnString);
 	//memcpy(outpString,&rtnString,sizeof(rtnString));
