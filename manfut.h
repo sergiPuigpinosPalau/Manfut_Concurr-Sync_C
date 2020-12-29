@@ -1,4 +1,10 @@
-
+/* ---------------------------------------------------------------
+Práctica 2.
+Código fuente: manfut.h
+Grau Informàtica
+49259953W i Sergi Puigpinós Palau.
+47694432E i Jordi Lazo Florensa.
+--------------------------------------------------------------- */
 // Players by position (7-footbal)
 #define  DPosPorters 1
 #define  DPosDefensors 3
