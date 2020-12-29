@@ -25,7 +25,7 @@ Grau Informàtica
 #define GetDefensor(j) (Jugadors[NPorters+j])
 #define GetMitg(j) (Jugadors[NPorters+NDefensors+j])
 #define GetDelanter(j) (Jugadors[NPorters+NDefensors+NMitjos+j])
-#define MAX_BUFFER_LENGTH 500
+#define MAX_BUFFER_LENGTH 1000
 #define ARRAY_SIZE 100
 
 char *color_red = "\033[01;31m";
@@ -48,7 +48,7 @@ void PrintJugadors();
 void PrintEquipJugadors(TJugadorsEquip equip);
 //TODO fill all
 void checkTeam(TEquip equip, TJugadorsEquip jugadors, int PresupostFitxatges, int costEquip, int puntuacioEquip);
-void calculateStatistics(TJugadorsEquip jugadors, int costEquip, int puntuacioEquip, struct Tstatistics statistics);
+void calculateStatistics(TJugadorsEquip jugadors, int costEquip, int puntuacioEquip, struct Tstatistics* statistics);
 void calculateGlobalStatistics(struct Tstatistics statistics);
 void printStatistics(struct Tstatistics statistics);
 void printGlobalStatistics();
@@ -57,6 +57,7 @@ void addMessageToQueue(char* message);
 void forcePrint();
 void messengerThreadFunc();
 void toStringEquipJugadors(TJugadorsEquip equip, char* outpString);
+void killMessenger();
 
 // Global variables definition
 TJugador Jugadors[DMaxJugadors];
@@ -76,6 +77,9 @@ int MaxPuntuacio=-1;
 char messageArray[ARRAY_SIZE][MAX_BUFFER_LENGTH];
 bool bForcePrint = false;
 int messageArrayIndx = 0;
+bool exitMess = false;
+
+
 
 //Mutex & locks
 pthread_mutex_t checkTeamLock = PTHREAD_MUTEX_INITIALIZER; 
@@ -84,6 +88,7 @@ pthread_mutex_t messengerArrayLock = PTHREAD_MUTEX_INITIALIZER;
 //Conditions
 pthread_cond_t itemAdded = PTHREAD_COND_INITIALIZER;
 pthread_cond_t evaluatorsEnded = PTHREAD_COND_INITIALIZER;
+pthread_cond_t messengerEnded = PTHREAD_COND_INITIALIZER;
 //Semaphore
 sem_t messengerSemaphore;
 //Barrier
@@ -293,8 +298,13 @@ void CalcularEquipOptim(long int PresupostFitxatges, PtrJugadorsEquip MillorEqui
 	pthread_mutex_lock(&evaluatorLock);
 	pthread_cond_wait(&evaluatorsEnded, &evaluatorLock);
 	pthread_mutex_unlock(&evaluatorLock);
-	
-	pthread_mutex_lock(&messengerArrayLock); //TODO wait for messenger to print all
+
+	//wait for messenger to print all and exit
+	pthread_mutex_lock(&messengerArrayLock);
+	killMessenger();
+	pthread_cond_wait(&messengerEnded, &messengerArrayLock);
+	pthread_mutex_unlock(&messengerArrayLock);
+
 
 	memcpy(MillorEquipRtn,&MillorEquip,sizeof(TJugadorsEquip));
 
@@ -303,12 +313,16 @@ void CalcularEquipOptim(long int PresupostFitxatges, PtrJugadorsEquip MillorEqui
 	//Destroy barrier
 	pthread_barrier_destroy(&evaluatorBarrier);
 	//Destroy conditions
+	//pthread_cancel(messengerThread);
 	pthread_cond_destroy(&itemAdded);
 	pthread_cond_destroy(&evaluatorsEnded);
+	//sprintf(cad,"evaluator MUTEX\n");
+	//write(1,cad,strlen(cad));
 	//Destroy mutex
 	pthread_mutex_destroy(&checkTeamLock);
 	pthread_mutex_destroy(&evaluatorLock);
 	pthread_mutex_destroy(&messengerArrayLock);
+
 }
 
 
@@ -350,7 +364,7 @@ TJugadorsEquip* evaluateThreadFunc(void* arguments)
 		checkTeam(equip, jugadors, args->PresupostFitxatges, costEquip, puntuacioEquip);
 		pthread_mutex_unlock(&checkTeamLock);
 
-		calculateStatistics(jugadors, costEquip, puntuacioEquip, statistics);
+		calculateStatistics(jugadors, costEquip, puntuacioEquip, &statistics);
 
 		if (statistics.numComb%M == 0)
             printStatistics(statistics);
@@ -365,7 +379,7 @@ TJugadorsEquip* evaluateThreadFunc(void* arguments)
 	//Print global statistics; send signal to parent
 	pthread_mutex_lock(&evaluatorLock);
 	printStatistics(statistics);
-	//calculateGlobalStatistics(statistics);//TODO divided by 0
+	calculateGlobalStatistics(statistics);
 	//Last thread prints global and sends signal to parent
 	sprintf(cad,"AAAAAAAA\n");
 	write(1,cad,strlen(cad));
@@ -403,16 +417,16 @@ void checkTeam(TEquip equip, TJugadorsEquip jugadors, int PresupostFitxatges, in
 	addMessageToQueue(cad);
 }
 
-void calculateStatistics(TJugadorsEquip jugadors, int costEquip, int puntuacioEquip, struct Tstatistics statistics) {
-	statistics.avgCostValidComb = ((statistics.avgCostValidComb * statistics.numValidComb) + costEquip) / (statistics.numValidComb+1);
-	statistics.avgScoreValidComb = ((statistics.avgScoreValidComb * statistics.numValidComb) + puntuacioEquip) / (statistics.numValidComb+1);
-	statistics.numValidComb++;
-	if (puntuacioEquip > statistics.bestScore){    //Best combination
-		statistics.bestScore = puntuacioEquip;
-		statistics.bestCombination = jugadors;
-	}else if (statistics.worseScore == 0 || puntuacioEquip < statistics.worseScore) {   //Worse combination
-		statistics.worseScore = puntuacioEquip;
-		statistics.worseCombination = jugadors;
+void calculateStatistics(TJugadorsEquip jugadors, int costEquip, int puntuacioEquip, struct Tstatistics* statistics) {
+	statistics->avgCostValidComb = ((statistics->avgCostValidComb * statistics->numValidComb) + costEquip) / (statistics->numValidComb+1);
+	statistics->avgScoreValidComb = ((statistics->avgScoreValidComb * statistics->numValidComb) + puntuacioEquip) / (statistics->numValidComb+1);
+	statistics->numValidComb++;
+	if (puntuacioEquip > statistics->bestScore){    //Best combination
+		statistics->bestScore = puntuacioEquip;
+		statistics->bestCombination = jugadors;
+	}else if (statistics->worseScore == 0 || puntuacioEquip < statistics->worseScore) {   //Worse combination
+		statistics->worseScore = puntuacioEquip;
+		statistics->worseCombination = jugadors;
 	}
 }
 
@@ -431,26 +445,7 @@ void calculateGlobalStatistics(struct Tstatistics statistics){
 	}
 }
 
-void printStatistics(struct Tstatistics statistics){
-	//char* bestComb;
-	//toStringEquipJugadors(statistics.bestCombination, bestComb);
-	//char* worseComb = toStringEquipJugadors(statistics.worseCombination);
-	//sprintf(cad, "*******THREAD %d STATISTICS******\
-	 	\nNúmero de Combinaciones evaluadas: %d \
-		\nNúmero de combinaciones no válidas: %d \
-		\nCoste promedio de las combinaciones válidas: %d \
-		\nPuntuación promedio de las combinaciones válidas: %i \
-		\nMejor combinación (desde el punto de vista de la puntuación): %s \
-		\nPeor combinación (desde el punto de vista de la puntuación): %s\
-		\n********************************************************", getpid(), statistics.numComb, statistics.numInvComb, statistics.avgCostValidComb, statistics.avgScoreValidComb, bestComb, worseComb);
-	//sprintf(cad,"statistic");
-	//sprintf(cad,"%s", bestComb);
-	//write(1,cad,strlen(cad));
-	//addMessageToQueue(cad);
-	//free(bestComb);
-	//free(worseComb);
-	//TODO free
-}
+
 
 
 void printGlobalStatistics(){
@@ -499,13 +494,19 @@ void forcePrint(){
 	pthread_mutex_unlock(&messengerArrayLock);
 }
 
+void killMessenger(){	
+	exitMess=true;
+	pthread_cond_signal(&itemAdded);
+}
 
 void messengerThreadFunc(){
-	while (true){
+	while (!exitMess){
 		pthread_mutex_lock(&messengerArrayLock); 
 		//Wait until list is full
-		while (messageArrayIndx != ARRAY_SIZE && !bForcePrint)
+		while (messageArrayIndx != ARRAY_SIZE && !bForcePrint && !exitMess)
 			pthread_cond_wait(&itemAdded, &messengerArrayLock);
+		if (exitMess)
+			continue;
 		//TODO check it returns the desired value
 		int remaining;
 		sem_getvalue(&messengerSemaphore, &remaining);   //In case of a forcePrint
@@ -520,6 +521,8 @@ void messengerThreadFunc(){
 		bForcePrint=false;
 		pthread_mutex_unlock(&messengerArrayLock);
 	}
+	pthread_mutex_unlock(&messengerArrayLock);
+	pthread_cond_signal(&messengerEnded);
 }
 
 
@@ -778,14 +781,37 @@ void PrintEquipJugadors(TJugadorsEquip equip)
 	write(1,"\n",strlen("\n"));
 }
 
-
+void printStatistics(struct Tstatistics statistics){
+	char bestComb[200];
+	char worseComb[200];
+	toStringEquipJugadors(statistics.bestCombination, bestComb);
+	toStringEquipJugadors(statistics.worseCombination, worseComb);
+	sprintf(cad, "*******THREAD %d STATISTICS******\
+	 	\nNúmero de Combinaciones evaluadas: %d \
+		\nNúmero de combinaciones no válidas: %d \
+		\nCoste promedio de las combinaciones válidas: %d \
+		\nPuntuación promedio de las combinaciones válidas: %i \
+		\nMejor combinación (desde el punto de vista de la puntuación):\n %s \
+		\nPeor combinación (desde el punto de vista de la puntuación):\n %s\
+		\n********************************************************\n", getpid(), statistics.numComb, statistics.numInvComb, statistics.avgCostValidComb, statistics.avgScoreValidComb, bestComb, worseComb);
+	//sprintf(cad,"statistic");
+	//sprintf(cad,"BRUH %s", bestComb);
+	//write(1,cad,strlen(cad));
+	//sleep(5);
+	addMessageToQueue(cad);
+	//free(bestComb);
+	//free(worseComb);
+	//TODO free
+}
 
 void toStringEquipJugadors(TJugadorsEquip equip, char* outpString)
 {
 	int x;
 	char rtnString[MAX_BUFFER_LENGTH];
+	//char* rtnString;
 
-	strcat(rtnString, "   Porters: ");
+	strcpy(rtnString, "   Porters: ");
+
 	//write(1,"   Porters: ",strlen("   Porters: "));
 	for(x=0;x<DPosPorters;x++)
 	{
@@ -821,11 +847,16 @@ void toStringEquipJugadors(TJugadorsEquip equip, char* outpString)
 	}
 	strcat(rtnString, "\n");
 
+	for (int i = 0; i < 200; i++)
+	{
+		outpString[i] = rtnString[i];
+	}
+	
+
 	//char* rtnString2 = malloc(strlen(rtnString)*sizeof(char));
 	//strcpy(outpString, rtnString);
 	//memcpy(outpString,&rtnString,sizeof(rtnString));
-
-	//sprintf(cad,"%s", rtnString);
+	//sprintf(cad,"%s", outpString);
 	//write(1,cad,strlen(cad));
 	//sleep(5);
 }
