@@ -425,10 +425,11 @@ void calculateGlobalStatistics(struct Tstatistics statistics){
 	globalStatistics.numValidComb += statistics.numValidComb;
 	globalStatistics.avgCostValidComb = ((globalStatistics.avgCostValidComb * globalStatistics.numValidComb) + (statistics.avgCostValidComb * statistics.numValidComb)) / globalStatistics.numValidComb;
 	globalStatistics.avgScoreValidComb = ((globalStatistics.avgScoreValidComb * globalStatistics.numValidComb) + (statistics.avgScoreValidComb * statistics.numValidComb)) / globalStatistics.numValidComb;
-	if (statistics.bestScore > globalStatistics.bestScore){    //Best combination regarding points
+	if (globalStatistics.bestScore == 0 || statistics.bestScore > globalStatistics.bestScore){    //Best combination regarding points
 		globalStatistics.bestScore = statistics.bestScore;
 		globalStatistics.bestCombination = statistics.bestCombination;
-	}else if (globalStatistics.worseScore == 0 || statistics.worseScore < globalStatistics.worseScore) {   //Worse combination regarding points
+	}
+	if (globalStatistics.worseScore == 0 || statistics.worseScore < globalStatistics.worseScore) {   //Worse combination regarding points
 		globalStatistics.worseScore = statistics.worseScore;
 		globalStatistics.worseCombination = statistics.worseCombination;
 	}
