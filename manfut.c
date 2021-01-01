@@ -49,7 +49,7 @@ void PrintEquipJugadors(TJugadorsEquip equip);
 
 //Functions added
 void checkTeam(TEquip equip, TJugadorsEquip jugadors, int PresupostFitxatges, int costEquip, int puntuacioEquip, char* buffer);
-void calculateStatistics(TJugadorsEquip jugadors, int costEquip, int puntuacioEquip, struct Tstatistics* statistics);
+void calculateStatistics(TJugadorsEquip jugadors, int costEquip, int puntuacioEquip, struct Tstatistics* statistics, int PresupostFitxatges);
 void calculateGlobalStatistics(struct Tstatistics statistics);
 void printStatistics(struct Tstatistics statistics, char* buffer);
 void printGlobalStatistics(char* buffer);
@@ -59,6 +59,8 @@ void forcePrint();
 void messengerThreadFunc();
 void toStringEquipJugadors(TJugadorsEquip equip, char* outpString);
 void killMessenger();
+void statisticsSummary(struct Tstatistics statistics, char* buffer);
+void cleanStatisticsStructure(struct Tstatistics* statistics);
 
 // Global variables definition
 TJugador Jugadors[DMaxJugadors];
@@ -66,7 +68,7 @@ int NJugadors, NPorters, NDefensors, NMitjos, NDelanters;
 char cad[MAX_BUFFER_LENGTH];
 
 //Shared variables READ-ONLY
-int threadsFinished = 0;
+int threadsWaitingSummary = 0;
 struct Tstatistics globalStatistics;
 int M = 2500;
 int numOfThreads;
@@ -74,6 +76,8 @@ int numOfThreads;
 //Shared variables
 TJugadorsEquip MillorEquip; 
 int MaxPuntuacio=-1;
+int threadsFinished;
+bool finalPrint=false;
 
 //Messenger variables
 char messageArray[ARRAY_SIZE][MAX_BUFFER_LENGTH];
@@ -94,7 +98,8 @@ pthread_cond_t messengerEnded = PTHREAD_COND_INITIALIZER;
 sem_t messengerSemaphore;
 
 //Barrier
-pthread_barrier_t evaluatorBarrier; 
+pthread_barrier_t evaluatorEntranceBarrier; 
+pthread_barrier_t evaluatorExitBarrier;
 
 
 
@@ -256,7 +261,10 @@ void CalcularEquipOptim(long int PresupostFitxatges, PtrJugadorsEquip MillorEqui
 	int remaining = ultimEquip-primerEquip;
 
 	//Initialize barrier and semaphore
-	if (pthread_barrier_init(&evaluatorBarrier, NULL, numOfThreads))
+	if (pthread_barrier_init(&evaluatorEntranceBarrier, NULL, numOfThreads))
+		error("Error while trying to create the barrier"); 
+
+	if (pthread_barrier_init(&evaluatorExitBarrier, NULL, numOfThreads))
 		error("Error while trying to create the barrier"); 
 	
 	if (sem_init(&messengerSemaphore, 0, ARRAY_SIZE) != 0)
@@ -299,7 +307,7 @@ void CalcularEquipOptim(long int PresupostFitxatges, PtrJugadorsEquip MillorEqui
 		error("Error while trying to destroy the messenger semaphore");
 
 	//Destroy barrier
-	if (pthread_barrier_destroy(&evaluatorBarrier) != 0)
+	if (pthread_barrier_destroy(&evaluatorEntranceBarrier) != 0)
 		error("Error while trying to destroy the evaluator's barrier");
 
 	//Destroy conditions
@@ -328,20 +336,28 @@ TJugadorsEquip* evaluateThreadFunc(void* arguments)
 	char buffer[MAX_BUFFER_LENGTH];	//Buffer for each thread so they don't overlap messages, to keep all the locks inside the same function and to keep it similar to java
 	struct threadsArg *args = arguments;
 	struct Tstatistics statistics;
+	statistics.numComb=0;
 	TEquip equip;
 
 	sprintf(buffer, "Thread: %lu ; First: %lld ; End: %lld \n", pthread_self(), args->first, args->end);	
 	addMessageToQueue(buffer);
 
+	//statistics.numComb++;	//Avoid printing statistics in the beggining
+
 	for (equip=args->first;equip<=args->end;equip++)
 	{
 		TJugadorsEquip jugadors;
+
+		statistics.numComb++;
+
+		if (statistics.numComb%M == 0)
+            statisticsSummary(statistics, buffer);
 		
 		// Get playes from team number. Returns false if the team is not valid.
-		if (!ObtenirJugadorsEquip(equip, &jugadors))
+		if (!ObtenirJugadorsEquip(equip, &jugadors)){
+			statistics.numInvComb++;
 			continue;
-		
-		statistics.numComb++;
+		}	
 		
 		// Reject teams with repeated players.
 		if (JugadorsRepetits(jugadors))
@@ -361,14 +377,24 @@ TJugadorsEquip* evaluateThreadFunc(void* arguments)
 		checkTeam(equip, jugadors, args->PresupostFitxatges, costEquip, puntuacioEquip, buffer);
 		pthread_mutex_unlock(&checkTeamLock);
 
-		calculateStatistics(jugadors, costEquip, puntuacioEquip, &statistics);
+		calculateStatistics(jugadors, costEquip, puntuacioEquip, &statistics, args->PresupostFitxatges);
 
-		if (statistics.numComb%M == 0)
-            printStatistics(statistics, buffer);
 	}
 
+	threadsFinished++;
+    while (threadsFinished <= numOfThreads){
+		if (threadsFinished == numOfThreads)
+			finalPrint=true;
+		statisticsSummary(statistics, buffer);
+	}
+
+	free(arguments);
+}
+
+
+void statisticsSummary(struct Tstatistics statistics, char* buffer){
 	//Wait for threads using a barrier
-	int rc = pthread_barrier_wait(&evaluatorBarrier); 
+	int rc = pthread_barrier_wait(&evaluatorEntranceBarrier); 
 	if(rc != 0 && rc != PTHREAD_BARRIER_SERIAL_THREAD)
 		error("Can't wait for barrier");
 	
@@ -377,17 +403,35 @@ TJugadorsEquip* evaluateThreadFunc(void* arguments)
 	printStatistics(statistics, buffer);
 	calculateGlobalStatistics(statistics);
 	//Last thread prints global and sends signal to parent	
-	if (threadsFinished == numOfThreads - 1){
+	if (threadsWaitingSummary == numOfThreads - 1){
 		printGlobalStatistics(buffer);
-		pthread_cond_signal(&evaluatorsEnded);
+		threadsWaitingSummary = 0;
+		cleanStatisticsStructure(&globalStatistics);
+		if (finalPrint) {
+			threadsFinished++;
+			pthread_cond_signal(&evaluatorsEnded);
+		}
 	} else {
-		threadsFinished++;
+		threadsWaitingSummary++;
 	}	
 	pthread_mutex_unlock(&evaluatorLock);
 
-	free(arguments);
+	//Wait for threads using a barrier
+	int rc2 = pthread_barrier_wait(&evaluatorExitBarrier); 
+	if(rc2 != 0 && rc2 != PTHREAD_BARRIER_SERIAL_THREAD)
+		error("Can't wait for barrier");
+
 }
 
+
+
+void cleanStatisticsStructure(struct Tstatistics* statistics){
+	statistics->numComb = 0;
+	statistics->numInvComb = 0;
+	statistics->numValidComb = 0;
+	statistics->avgCostValidComb = 0;
+	statistics->avgScoreValidComb = 0;
+}
 
 void checkTeam(TEquip equip, TJugadorsEquip jugadors, int PresupostFitxatges, int costEquip, int puntuacioEquip, char* buffer){
 	// Chech if the team points is bigger than current optimal team, then evaluate if the cost is lower than the available budget
@@ -406,11 +450,11 @@ void checkTeam(TEquip equip, TJugadorsEquip jugadors, int PresupostFitxatges, in
 }
 
 
-void calculateStatistics(TJugadorsEquip jugadors, int costEquip, int puntuacioEquip, struct Tstatistics* statistics) {
+void calculateStatistics(TJugadorsEquip jugadors, int costEquip, int puntuacioEquip, struct Tstatistics* statistics, int PresupostFitxatges) {
 	statistics->avgCostValidComb = ((statistics->avgCostValidComb * statistics->numValidComb) + costEquip) / (statistics->numValidComb+1);
 	statistics->avgScoreValidComb = ((statistics->avgScoreValidComb * statistics->numValidComb) + puntuacioEquip) / (statistics->numValidComb+1);
 	statistics->numValidComb++;
-	if (puntuacioEquip > statistics->bestScore){    //Best combination
+	if (puntuacioEquip > statistics->bestScore && costEquip < PresupostFitxatges){    //Best combination
 		statistics->bestScore = puntuacioEquip;
 		statistics->bestCombination = jugadors;
 	}else if (statistics->worseScore == 0 || puntuacioEquip < statistics->worseScore) {   //Worse combination
@@ -423,17 +467,21 @@ void calculateGlobalStatistics(struct Tstatistics statistics){
 	globalStatistics.numComb += statistics.numComb;
 	globalStatistics.numInvComb += statistics.numInvComb;
 	globalStatistics.numValidComb += statistics.numValidComb;
-	globalStatistics.avgCostValidComb = ((globalStatistics.avgCostValidComb * globalStatistics.numValidComb) + (statistics.avgCostValidComb * statistics.numValidComb)) / globalStatistics.numValidComb;
-	globalStatistics.avgScoreValidComb = ((globalStatistics.avgScoreValidComb * globalStatistics.numValidComb) + (statistics.avgScoreValidComb * statistics.numValidComb)) / globalStatistics.numValidComb;
-	if (globalStatistics.bestScore == 0 || statistics.bestScore > globalStatistics.bestScore){    //Best combination regarding points
-		globalStatistics.bestScore = statistics.bestScore;
-		globalStatistics.bestCombination = statistics.bestCombination;
-	}
-	if (globalStatistics.worseScore == 0 || statistics.worseScore < globalStatistics.worseScore) {   //Worse combination regarding points
-		globalStatistics.worseScore = statistics.worseScore;
-		globalStatistics.worseCombination = statistics.worseCombination;
+	if (statistics.numValidComb != 0)
+	{
+		globalStatistics.avgCostValidComb = ((globalStatistics.avgCostValidComb * globalStatistics.numValidComb) + (statistics.avgCostValidComb * statistics.numValidComb)) / globalStatistics.numValidComb;
+		globalStatistics.avgScoreValidComb = ((globalStatistics.avgScoreValidComb * globalStatistics.numValidComb) + (statistics.avgScoreValidComb * statistics.numValidComb)) / globalStatistics.numValidComb;
+		if (globalStatistics.bestScore == 0 || statistics.bestScore > globalStatistics.bestScore){    //Best combination regarding points
+			globalStatistics.bestScore = statistics.bestScore;
+			globalStatistics.bestCombination = statistics.bestCombination;
+		}
+		if (globalStatistics.worseScore == 0 || (statistics.worseScore < globalStatistics.worseScore && statistics.worseScore != 0)) {   //Worse combination regarding points
+			globalStatistics.worseScore = statistics.worseScore;
+			globalStatistics.worseCombination = statistics.worseCombination;
+		}
 	}
 }
+
 
 void printStatistics(struct Tstatistics statistics, char* buffer){
 	char bestComb[COMB_ARR_SIZE];
@@ -443,11 +491,11 @@ void printStatistics(struct Tstatistics statistics, char* buffer){
 	sprintf(buffer, "*******THREAD %lu STATISTICS******\
 	 	\nNúmero de Combinaciones evaluadas: %d \
 		\nNúmero de combinaciones no válidas: %d \
-		\nCoste promedio de las combinaciones válidas: %d \
-		\nPuntuación promedio de las combinaciones válidas: %i \
-		\nMejor combinación (desde el punto de vista de la puntuación):\n%s \
-		\nPeor combinación (desde el punto de vista de la puntuación):\n%s\
-		\n********************************************************\n", pthread_self(), statistics.numComb, statistics.numInvComb, statistics.avgCostValidComb, statistics.avgScoreValidComb, bestComb, worseComb);
+		\nCoste promedio de las combinaciones válidas: %f \
+		\nPuntuación promedio de las combinaciones válidas: %f \
+		\nMejor combinación (desde el punto de vista de la puntuación):\n%s   Cost %d, Points: %d. \
+		\nPeor combinación (desde el punto de vista de la puntuación):\n%s   Cost %d, Points: %d. \
+		\n********************************************************\n", pthread_self(), statistics.numComb, statistics.numInvComb, statistics.avgCostValidComb, statistics.avgScoreValidComb, bestComb, CostEquip(statistics.bestCombination), PuntuacioEquip(statistics.bestCombination), worseComb, CostEquip(statistics.worseCombination), PuntuacioEquip(statistics.worseCombination));
 	addMessageToQueue(buffer);
 }
 
@@ -460,12 +508,14 @@ void printGlobalStatistics(char* buffer){
 	sprintf(buffer, "*******GLOBAL  STATISTICS******\
 	 	\nNúmero de Combinaciones evaluadas: %d \
 		\nNúmero de combinaciones no válidas: %d \
-		\nCoste promedio de las combinaciones válidas: %d \
-		\nPuntuación promedio de las combinaciones válidas: %d \
-		\nMejor combinación (desde el punto de vista de la puntuación):\n%s \
-		\nPeor combinación (desde el punto de vista de la puntuación):\n%s\
-		\n********************************************************\n", globalStatistics.numComb, globalStatistics.numInvComb, globalStatistics.avgCostValidComb, globalStatistics.avgScoreValidComb, bestComb, worseComb);
+		\nCoste promedio de las combinaciones válidas: %f \
+		\nPuntuación promedio de las combinaciones válidas: %f \
+		\nMejor combinación (desde el punto de vista de la puntuación):\n%s   Cost %d, Points: %d. \
+		\nPeor combinación (desde el punto de vista de la puntuación):\n%s   Cost %d, Points: %d. \
+		\n********************************************************\n", globalStatistics.numComb, globalStatistics.numInvComb, globalStatistics.avgCostValidComb, globalStatistics.avgScoreValidComb, bestComb, CostEquip(globalStatistics.bestCombination), PuntuacioEquip(globalStatistics.bestCombination), worseComb, CostEquip(globalStatistics.worseCombination), PuntuacioEquip(globalStatistics.worseCombination));
 	addMessageToQueue(buffer);
+	//sprintf(buffer,"AAAAA %i \n",  PuntuacioEquip(globalStatistics.worseCombination));
+	//addMessageToQueue(buffer);
 }
 
 
@@ -479,6 +529,7 @@ void printMessages(){
 	}
 	memset(messageArray, 0, sizeof messageArray);
 	messageArrayIndx = 0;
+	//sleep(5);
 }
 
 

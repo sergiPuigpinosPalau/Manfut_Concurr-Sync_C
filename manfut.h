@@ -61,8 +61,8 @@ struct Tstatistics{
     int numComb;
     int numInvComb;
     int numValidComb;
-    int avgCostValidComb;
-    int avgScoreValidComb;
+    float avgCostValidComb;
+    float avgScoreValidComb;
     TJugadorsEquip bestCombination;
     int bestScore;
     TJugadorsEquip worseCombination;
