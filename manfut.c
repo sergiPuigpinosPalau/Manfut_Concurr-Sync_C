@@ -24,7 +24,7 @@ Grau Informàtica
 #define GetDefensor(j) (Jugadors[NPorters+j])
 #define GetMitg(j) (Jugadors[NPorters+NDefensors+j])
 #define GetDelanter(j) (Jugadors[NPorters+NDefensors+NMitjos+j])
-#define MAX_BUFFER_LENGTH 1000
+#define MAX_BUFFER_LENGTH 2000
 #define ARRAY_SIZE 100
 #define COMB_ARR_SIZE 200
 
@@ -342,8 +342,6 @@ TJugadorsEquip* evaluateThreadFunc(void* arguments)
 	sprintf(buffer, "Thread: %lu ; First: %lld ; End: %lld \n", pthread_self(), args->first, args->end);	
 	addMessageToQueue(buffer);
 
-	//statistics.numComb++;	//Avoid printing statistics in the beggining
-
 	for (equip=args->first;equip<=args->end;equip++)
 	{
 		TJugadorsEquip jugadors;
@@ -444,7 +442,7 @@ void checkTeam(TEquip equip, TJugadorsEquip jugadors, int PresupostFitxatges, in
 	}
 	else
 	{
-		sprintf(buffer,"Team %lld -> Cost: %d  Points: %d. \n", equip, costEquip, puntuacioEquip);
+		sprintf(buffer,"Team %lld -> Cost: %d  Points: %d. \r", equip, costEquip, puntuacioEquip);
 	}
 	addMessageToQueue(buffer);
 }
@@ -505,14 +503,14 @@ void printGlobalStatistics(char* buffer){
 	char worseComb[COMB_ARR_SIZE];
 	toStringEquipJugadors(globalStatistics.bestCombination, bestComb);
 	toStringEquipJugadors(globalStatistics.worseCombination, worseComb);
-	sprintf(buffer, "*******GLOBAL  STATISTICS******\
+	sprintf(buffer, "\033[01;34m*******GLOBAL  STATISTICS******\
 	 	\nNúmero de Combinaciones evaluadas: %d \
 		\nNúmero de combinaciones no válidas: %d \
 		\nCoste promedio de las combinaciones válidas: %f \
 		\nPuntuación promedio de las combinaciones válidas: %f \
 		\nMejor combinación (desde el punto de vista de la puntuación):\n%s   Cost %d, Points: %d. \
 		\nPeor combinación (desde el punto de vista de la puntuación):\n%s   Cost %d, Points: %d. \
-		\n********************************************************\n", globalStatistics.numComb, globalStatistics.numInvComb, globalStatistics.avgCostValidComb, globalStatistics.avgScoreValidComb, bestComb, CostEquip(globalStatistics.bestCombination), PuntuacioEquip(globalStatistics.bestCombination), worseComb, CostEquip(globalStatistics.worseCombination), PuntuacioEquip(globalStatistics.worseCombination));
+		\n********************************************************\n \033[00m", globalStatistics.numComb, globalStatistics.numInvComb, globalStatistics.avgCostValidComb, globalStatistics.avgScoreValidComb, bestComb, CostEquip(globalStatistics.bestCombination), PuntuacioEquip(globalStatistics.bestCombination), worseComb, CostEquip(globalStatistics.worseCombination), PuntuacioEquip(globalStatistics.worseCombination));
 	addMessageToQueue(buffer);
 	//sprintf(buffer,"AAAAA %i \n",  PuntuacioEquip(globalStatistics.worseCombination));
 	//addMessageToQueue(buffer);
