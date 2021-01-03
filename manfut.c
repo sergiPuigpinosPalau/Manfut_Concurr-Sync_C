@@ -26,7 +26,7 @@ Grau Informàtica
 #define GetDelanter(j) (Jugadors[NPorters+NDefensors+NMitjos+j])
 #define MAX_BUFFER_LENGTH 2000
 #define ARRAY_SIZE 100
-#define COMB_ARR_SIZE 200
+#define COMB_ARR_SIZE 400
 
 char *color_red = "\033[01;31m";
 char *color_green = "\033[01;32m";
@@ -57,7 +57,7 @@ void printMessages();
 void addMessageToQueue(char* message);
 void forcePrint();
 void messengerThreadFunc();
-void toStringEquipJugadors(TJugadorsEquip equip, char* outpString);
+void toStringEquipJugadors(TJugadorsEquip equip, char* outpString, char* buffer);
 void killMessenger();
 void statisticsSummary(struct Tstatistics statistics, char* buffer);
 void cleanStatisticsStructure(struct Tstatistics* statistics);
@@ -65,7 +65,7 @@ void cleanStatisticsStructure(struct Tstatistics* statistics);
 // Global variables definition
 TJugador Jugadors[DMaxJugadors];
 int NJugadors, NPorters, NDefensors, NMitjos, NDelanters;
-char cad[MAX_BUFFER_LENGTH];
+char cad[256];
 
 //Shared variables READ-ONLY
 int threadsWaitingSummary = 0;
@@ -464,11 +464,11 @@ void calculateStatistics(TJugadorsEquip jugadors, int costEquip, int puntuacioEq
 void calculateGlobalStatistics(struct Tstatistics statistics){
 	globalStatistics.numComb += statistics.numComb;
 	globalStatistics.numInvComb += statistics.numInvComb;
-	globalStatistics.numValidComb += statistics.numValidComb;
 	if (statistics.numValidComb != 0)
 	{
-		globalStatistics.avgCostValidComb = ((globalStatistics.avgCostValidComb * globalStatistics.numValidComb) + (statistics.avgCostValidComb * statistics.numValidComb)) / globalStatistics.numValidComb;
-		globalStatistics.avgScoreValidComb = ((globalStatistics.avgScoreValidComb * globalStatistics.numValidComb) + (statistics.avgScoreValidComb * statistics.numValidComb)) / globalStatistics.numValidComb;
+		globalStatistics.avgCostValidComb = ((globalStatistics.avgCostValidComb * globalStatistics.numValidComb) + (statistics.avgCostValidComb * statistics.numValidComb)) / (globalStatistics.numValidComb + statistics.numValidComb);
+		globalStatistics.avgScoreValidComb = ((globalStatistics.avgScoreValidComb * globalStatistics.numValidComb) + (statistics.avgScoreValidComb * statistics.numValidComb)) / (globalStatistics.numValidComb + statistics.numValidComb);
+		globalStatistics.numValidComb += statistics.numValidComb;
 		if (globalStatistics.bestScore == 0 || statistics.bestScore > globalStatistics.bestScore){    //Best combination regarding points
 			globalStatistics.bestScore = statistics.bestScore;
 			globalStatistics.bestCombination = statistics.bestCombination;
@@ -484,8 +484,8 @@ void calculateGlobalStatistics(struct Tstatistics statistics){
 void printStatistics(struct Tstatistics statistics, char* buffer){
 	char bestComb[COMB_ARR_SIZE];
 	char worseComb[COMB_ARR_SIZE];
-	toStringEquipJugadors(statistics.bestCombination, bestComb);
-	toStringEquipJugadors(statistics.worseCombination, worseComb);
+	toStringEquipJugadors(statistics.bestCombination, bestComb, buffer);
+	toStringEquipJugadors(statistics.worseCombination, worseComb, buffer);
 	sprintf(buffer, "*******THREAD %lu STATISTICS******\
 	 	\nNúmero de Combinaciones evaluadas: %d \
 		\nNúmero de combinaciones no válidas: %d \
@@ -501,8 +501,8 @@ void printStatistics(struct Tstatistics statistics, char* buffer){
 void printGlobalStatistics(char* buffer){
 	char bestComb[COMB_ARR_SIZE];
 	char worseComb[COMB_ARR_SIZE];
-	toStringEquipJugadors(globalStatistics.bestCombination, bestComb);
-	toStringEquipJugadors(globalStatistics.worseCombination, worseComb);
+	toStringEquipJugadors(globalStatistics.bestCombination, bestComb, buffer);
+	toStringEquipJugadors(globalStatistics.worseCombination, worseComb, buffer);
 	sprintf(buffer, "\033[01;34m*******GLOBAL  STATISTICS******\
 	 	\nNúmero de Combinaciones evaluadas: %d \
 		\nNúmero de combinaciones no válidas: %d \
@@ -817,40 +817,40 @@ void PrintEquipJugadors(TJugadorsEquip equip)
 }
 
 
-void toStringEquipJugadors(TJugadorsEquip equip, char* outpString)
+void toStringEquipJugadors(TJugadorsEquip equip, char* outpString, char* buffer)
 {
 	int x;
-	char rtnString[MAX_BUFFER_LENGTH];
+	char rtnString[COMB_ARR_SIZE];
 
 	strcpy(rtnString, "   Porters: ");
 	for(x=0;x<DPosPorters;x++)
 	{
-		sprintf(cad,"%s (%d/%d), ",GetPorter(equip.Porter[x]).nom, GetPorter(equip.Porter[x]).cost, GetPorter(equip.Porter[x]).punts);
-		strcat(rtnString, cad);
+		sprintf(buffer,"%s (%d/%d), ",GetPorter(equip.Porter[x]).nom, GetPorter(equip.Porter[x]).cost, GetPorter(equip.Porter[x]).punts);
+		strcat(rtnString, buffer);
 	}
 	strcat(rtnString, "\n");
 
 	strcat(rtnString, "   Defenses: ");
 	for(x=0;x<DPosDefensors;x++)
 	{
-		sprintf(cad,"%s (%d/%d), ",GetDefensor(equip.Defensors[x]).nom, GetDefensor(equip.Defensors[x]).cost, GetDefensor(equip.Defensors[x]).punts);
-		strcat(rtnString, cad);
+		sprintf(buffer,"%s (%d/%d), ",GetDefensor(equip.Defensors[x]).nom, GetDefensor(equip.Defensors[x]).cost, GetDefensor(equip.Defensors[x]).punts);
+		strcat(rtnString, buffer);
 	}
 	strcat(rtnString, "\n");
 
 	strcat(rtnString, "   Mitjos: ");
 	for(x=0;x<DPosMitjos;x++)
 	{
-		sprintf(cad,"%s (%d/%d), ",GetMitg(equip.Mitjos[x]).nom, GetMitg(equip.Mitjos[x]).cost, GetMitg(equip.Mitjos[x]).punts);
-		strcat(rtnString, cad);
+		sprintf(buffer,"%s (%d/%d), ",GetMitg(equip.Mitjos[x]).nom, GetMitg(equip.Mitjos[x]).cost, GetMitg(equip.Mitjos[x]).punts);
+		strcat(rtnString, buffer);
 	}
 	strcat(rtnString, "\n");
 	
 	strcat(rtnString, "   Delanters: ");
 	for(x=0;x<DPosDelanters;x++)
 	{
-		sprintf(cad,"%s (%d/%d), ",GetDelanter(equip.Delanters[x]).nom, GetDelanter(equip.Delanters[x]).cost, GetDelanter(equip.Delanters[x]).punts);
-		strcat(rtnString, cad);
+		sprintf(buffer,"%s (%d/%d), ",GetDelanter(equip.Delanters[x]).nom, GetDelanter(equip.Delanters[x]).cost, GetDelanter(equip.Delanters[x]).punts);
+		strcat(rtnString, buffer);
 	}
 	strcat(rtnString, "\n");
 
